@@ -280,6 +280,14 @@ td.baja { font-weight: 600; }
 .salir-btn { border: 0; background: none; color: var(--suave); text-decoration: underline; padding: .3rem .2rem; }
 .salir-btn:hover { color: var(--baja); }
 
+.ajustes summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: baseline; }
+.ajustes-tit { font-family: var(--cond); font-weight: 600; font-size: 1.15rem; }
+.ajustes-res { color: var(--suave); font-size: .88rem; }
+.ajustes p { max-width: 75ch; color: var(--suave); margin: 1rem 0; }
+.tabla-liston { max-width: 40rem; }
+.tabla-liston input, .ajustes-pie input { width: 5.5rem; text-align: right; padding: .3rem .45rem; border: 1px solid var(--linea); border-radius: 6px; background: var(--fondo); }
+.ajustes-pie { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-top: 1rem; }
+
 </style>
 </head>
 <body>
@@ -321,8 +329,8 @@ td.baja { font-weight: 600; }
       <h2 id="t-vol" class="vol-titulo">Cabos vendidos</h2>
       <p class="vol-num" id="cabos">—</p>
       <dl class="vol-datos">
-        <div><dt>Madera en cabos</dt><dd id="m3">—</dd></div>
-        <div><dt>Pies tablares equivalentes</dt><dd id="pt">—</dd></div>
+        <div><dt>Madera en listones</dt><dd id="m3">—</dd></div>
+        <div><dt>Pies tablares de listón</dt><dd id="pt">—</dd></div>
         <div><dt>Precio promedio por cabo</dt><dd id="pcabo">—</dd></div>
         <div><dt>Contra el período anterior</dt><dd id="cabos-delta">—</dd></div>
       </dl>
@@ -364,6 +372,19 @@ td.baja { font-weight: 600; }
     <div class="tabla-scroll"><table id="t-vencidas"></table></div>
   </section>
 
+  <details class="panel ajustes">
+    <summary><span class="ajustes-tit">Medidas del listón de partida</span> <span class="ajustes-res" id="liston-resumen"></span></summary>
+    <p>El volumen se calcula con la sección del listón del que sale cada cabo: espesor × ancho en pulgadas × largo del cabo, más el sobrelargo si cortan el listón más largo. Corregí las medidas con las que trabajan y tocá Aplicar; quedan guardadas en este navegador.</p>
+    <div class="tabla-scroll"><table class="tabla-liston">
+      <thead><tr><th>Diámetro</th><th>Espesor (pulg.)</th><th>Ancho (pulg.)</th><th>Cabo de 1,20 m</th></tr></thead>
+      <tbody id="liston-filas"></tbody>
+    </table></div>
+    <div class="ajustes-pie">
+      <label>Sobrelargo del listón <input type="text" inputmode="decimal" id="liston-sobrelargo"> cm</label>
+      <button id="liston-aplicar" class="primario">Aplicar</button>
+    </div>
+  </details>
+
   <footer class="pie" id="pie"></footer>
 </main>
 
@@ -377,6 +398,14 @@ td.baja { font-weight: 600; }
   // Renglones que son impuestos cobrados y no producto (se comparan en minúsculas)
   const ITEMS_IMPUESTO = ['imp'];
   const DIAMETRO_DEF = 23; // mm, si el nombre no lo dice
+  // Sección del listón de partida por diámetro de cabo, en pulgadas [espesor, ancho]
+  const LISTON_DEF = { secciones: { '23': [1, 1], '28': [1.25, 1.25] }, otro: [1, 1], sobrelargo: 0 };
+  function ptListon(cl, cfg) {
+    const c = cfg || LISTON_DEF;
+    const s = (c.secciones && c.secciones[String(cl.diam)]) || c.otro || [1, 1];
+    const largoPies = (cl.largo + (c.sobrelargo || 0) / 100) / 0.3048;
+    return s[0] * s[1] * largoPies / 12;
+  }
 
   const COLUMNAS = {
     id: ['Invoice ID', 'ID de factura'],
@@ -503,7 +532,7 @@ td.baja { font-weight: 600; }
         const diam = d ? +d[1] : DIAMETRO_DEF;
         const cal = (t) => (/premi(um|un)/i.test(t) ? 'Premium' : /\b1ra\b/i.test(t) ? '1ra' : /\b2da\b/i.test(t) ? '2da' : /[uú]nica/i.test(t) ? 'Única' : '');
         const calidad = cal(nombre) || cal(it.d || '');
-        r = { tipo: 'cabo', largo, diam, calidad, m3: Math.PI * Math.pow(diam / 2000, 2) * largo };
+        r = { tipo: 'cabo', largo, diam, calidad };
       }
     }
     cacheClase.set(clave, r);
@@ -523,7 +552,7 @@ td.baja { font-weight: 600; }
     return out;
   }
 
-  function resumir(lista, desde, hasta) {
+  function resumir(lista, desde, hasta, cfgListon) {
     const fs = lista.filter((f) => f.fecha >= desde && f.fecha <= hasta);
     const meses = {};
     mesesEntre(desde, hasta).forEach((k) => { meses[k] = { mes: k, ventas: 0, cabos: 0, m3: 0 }; });
@@ -553,7 +582,7 @@ td.baja { font-weight: 600; }
         p.unidades += it.q;
         p.ventas += v;
         if (cl.tipo === 'cabo') {
-          const m3 = it.q * cl.m3;
+          const m3 = it.q * ptListon(cl, cfgListon) * PT_M3;
           k.cabos += it.q; k.m3 += m3; k.cabosVentas += v;
           p.m3 += m3; c.cabos += it.q; c.m3 += m3;
           if (mes) { mes.cabos += it.q; mes.m3 += m3; }
@@ -599,7 +628,7 @@ td.baja { font-weight: 600; }
     return r;
   }
 
-  const Nucleo = { parseCSV, leerFacturas, clasificar, resumir, cobranzas, mesesEntre, PT_M3 };
+  const Nucleo = { parseCSV, leerFacturas, clasificar, resumir, cobranzas, mesesEntre, ptListon, LISTON_DEF, PT_M3 };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Nucleo; return; }
 
   // ================= Interfaz =================
@@ -620,6 +649,51 @@ td.baja { font-weight: 600; }
   let lista = [];
   let periodo = { p: '6m' };
   let unidad = 'cabos';
+  const CLAVE_LISTON = 'tacoma-liston';
+  let liston = (() => {
+    try {
+      const g = JSON.parse(localStorage.getItem(CLAVE_LISTON));
+      if (g && g.secciones) return { ...LISTON_DEF, ...g, secciones: { ...LISTON_DEF.secciones, ...g.secciones } };
+    } catch (e) { /* sin configuración guardada */ }
+    return JSON.parse(JSON.stringify(LISTON_DEF));
+  })();
+  const pulg = (v) => n2.format(v).replace(/,00$/, '').replace(/,50$/, ' ½').replace(/,25$/, ' ¼').replace(/,75$/, ' ¾');
+
+  function dibujarListon() {
+    const diams = [...new Set(lista.flatMap((f) => (f.items || []).map((it) => clasificar(it)).filter((c) => c.tipo === 'cabo').map((c) => String(c.diam))))].sort();
+    diams.forEach((d) => { if (!liston.secciones[d]) liston.secciones[d] = liston.otro.slice(); });
+    const ej = { tipo: 'cabo', largo: 1.2 };
+    $('#liston-filas').innerHTML = diams.map((d) => {
+      const [e, a] = liston.secciones[d];
+      const pt = ptListon({ ...ej, diam: +d }, liston);
+      return `<tr><td>Cabo de ${d} mm</td>
+        <td><input type="text" inputmode="decimal" data-d="${d}" data-i="0" value="${n2.format(e)}" aria-label="Espesor del listón para ${d} mm"></td>
+        <td><input type="text" inputmode="decimal" data-d="${d}" data-i="1" value="${n2.format(a)}" aria-label="Ancho del listón para ${d} mm"></td>
+        <td>${n2.format(pt)} pt</td></tr>`;
+    }).join('');
+    $('#liston-sobrelargo').value = n1.format(liston.sobrelargo || 0);
+    $('#liston-resumen').textContent = diams.map((d) => `${d} mm: ${pulg(liston.secciones[d][0])}" × ${pulg(liston.secciones[d][1])}"`).join(', ') + (liston.sobrelargo ? `, más ${n1.format(liston.sobrelargo)} cm de largo` : '');
+  }
+
+  function aplicarListon() {
+    const nuevo = { ...liston, secciones: { ...liston.secciones } };
+    let error = '';
+    document.querySelectorAll('#liston-filas input').forEach((inp) => {
+      const v = num(inp.value);
+      if (!(v > 0 && v < 20)) error = 'Las medidas del listón tienen que ser pulgadas mayores que cero.';
+      const d = inp.dataset.d;
+      nuevo.secciones[d] = (nuevo.secciones[d] || [1, 1]).slice();
+      nuevo.secciones[d][+inp.dataset.i] = v;
+    });
+    const sl = num($('#liston-sobrelargo').value);
+    if (sl < 0 || sl > 50) error = 'El sobrelargo tiene que estar entre 0 y 50 cm.';
+    if (error) { estado(error, 'error'); return; }
+    nuevo.sobrelargo = sl;
+    liston = nuevo;
+    try { localStorage.setItem(CLAVE_LISTON, JSON.stringify(liston)); } catch (e) { /* no se pudo guardar */ }
+    dibujar();
+    estado('Medidas del listón actualizadas.', 'ok');
+  }
 
   function estado(html, tipo) {
     $('#estado').innerHTML = html ? `<p class="${tipo || ''}">${html}</p>` : '';
@@ -771,12 +845,14 @@ td.baja { font-weight: 600; }
     if (!hayDatos) return;
 
     const rg = rango(periodo);
-    const d = resumir(lista, iso(rg.desde), iso(rg.hasta));
+    const d = resumir(lista, iso(rg.desde), iso(rg.hasta), liston);
     const primera = lista.reduce((m, f) => (f.fecha < m ? f.fecha : m), '9999');
     const antCompleto = rg.ant && iso(rg.ant.desde) >= primera.slice(0, 7) + '-01';
-    const a = antCompleto ? resumir(lista, iso(rg.ant.desde), iso(rg.ant.hasta)) : null;
+    const a = antCompleto ? resumir(lista, iso(rg.ant.desde), iso(rg.ant.hasta), liston) : null;
     const k = d.kpi, ka = a ? a.kpi : null;
     const vsAnt = ' contra el período anterior';
+
+    dibujarListon();
 
     // Volumen
     $('#cabos').textContent = n0.format(k.cabos);
@@ -848,7 +924,7 @@ td.baja { font-weight: 600; }
     if (k.envios) notas.push(`Envíos facturados en el período: ${pesos.format(k.envios)}.`);
     if (k.usd) notas.push(`${k.usd} facturas en moneda extranjera convertidas al tipo de cambio de cada factura.`);
     if (d.sinMedida.length) notas.push(`Sin medida de cabo: ${d.sinMedida.slice(0, 5).map((s) => s.nombre).join(', ')}.`);
-    notas.push('El volumen es la madera del cabo terminado (cilindro de largo por diámetro). 1 pie tablar = 0,00236 m³.');
+    notas.push('El volumen es el del listón de partida de cada cabo (espesor × ancho × largo), según las medidas configuradas. 1 pie tablar = 1" × 12" × 1 pie = 0,00236 m³.');
     $('#pie').textContent = notas.join(' ');
   }
 
@@ -874,6 +950,7 @@ td.baja { font-weight: 600; }
   $('#cargar2').addEventListener('click', elegirArchivo);
   $('#archivo').addEventListener('change', (e) => procesarArchivo(e.target.files[0]));
   $('#respaldo').addEventListener('click', descargarRespaldo);
+  $('#liston-aplicar').addEventListener('click', aplicarListon);
   $('#borrar').addEventListener('click', borrarDatos);
 
   // Arrastrar y soltar en toda la página
